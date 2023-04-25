@@ -16,10 +16,15 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         # Embedding for the position of the token
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        # ae. 4 heads of 8 dimensions = emb size of 32
-        self.sa_head = MultiHeadAttention(n_heads=4, head_size=n_embd // 4, n_embd=n_embd, block_size=block_size)
+
+        # Use multiple Transformer Blocks:
+        self.blocks = nn.Sequential(
+            Block(4, n_embd, block_size),
+            Block(4, n_embd, block_size),
+            Block(4, n_embd, block_size)
+        )
+
         self.lm_head = nn.Linear(n_embd, vocab_size)
-        self.ffwd = FeedForward(n_embd)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         B, T = idx.shape
@@ -28,8 +33,10 @@ class BigramLanguageModel(nn.Module):
         token_emb = self.token_embedding_table(idx)  # (B,T,C)
         pos_emb = self.position_embedding_table(torch.arange(T, device=self.device))  # (T,C)
         x = token_emb + pos_emb  # (B,T,C) --> created by broadcasting T,C to B dimension
-        x = self.sa_head(x)  # Pass through self-attention
-        x = self.ffwd(x)  # Add feed forward layer to give attention results more 'space to develop'
+
+        # Pass through transformer blocks:
+        x = self.blocks(x)
+
         logits = self.lm_head(x)  # (B,T,vocab_size)
         # E.g. predict what comes next by learning the logits (probabilities of next token) for each token.
 
@@ -84,7 +91,7 @@ class Head(nn.Module):
         wei = query * key.transpose(-2, -1) * C ** -0.5  # (B,T,C) @ (B,C,T) -> (B,T,T)
         # Here: Use a numerical trick to get 0 to be actually 0 after using the exp in the softmax!
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
-        weu = F.softmax(wei, dim=-1)  # (B, T, T)
+        wei = F.softmax(wei, dim=-1)  # (B, T, T)
 
         # Weighted aggregation
         out = wei @ value
@@ -97,9 +104,14 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, n_heads: int, head_size: int, n_embd: int, block_size: int):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(n_heads)])
+        # Add a projection layer to linearity transform the output of the heads
+        self.proj = nn.Linear(n_heads * head_size, n_embd)
 
     def forward(self, x):
-        return torch.cat([h(x) for h in self.heads], dim=-1)
+        # Add residual connection via projection to self.
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out
 
 
 class FeedForward(nn.Module):
@@ -108,9 +120,26 @@ class FeedForward(nn.Module):
     def __init__(self, n_embd: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_embd, n_embd),
-            nn.ReLU()
+            nn.Linear(n_embd, 4 * n_embd),  # *4 is from the optimizations in the 'Attention is all you need' paper.
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd)  # Add projection here as well (residual connection basically)
         )
 
     def forward(self, x):
         return self.net(x)
+
+
+class Block(nn.Module):
+    """Transformer Block, consists of communication (self-attention) and computation (feed forward)"""
+
+    def __init__(self, n_heads: int, n_embd: int, block_size: int):
+        super().__init__()
+        head_size = n_embd // n_heads
+        self.sa = MultiHeadAttention(n_heads, head_size, n_embd, block_size)
+        self.ffwd = FeedForward(n_embd)
+
+    def forward(self, x):
+        # Add residual connections to help optimize the training for deep architectures
+        x = x + self.sa(x)  # Pass through self-attention
+        x = x + self.ffwd(x)  # Add feed forward layer to give attention results more 'space to develop'
+        return x
