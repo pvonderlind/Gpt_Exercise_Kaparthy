@@ -16,7 +16,8 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         # Embedding for the position of the token
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.sa_head = Head(head_size=n_embd, n_embd=n_embd, block_size=block_size)
+        # ae. 4 heads of 8 dimensions = emb size of 32
+        self.sa_head = MultiHeadAttention(n_heads=4, head_size=n_embd//4, n_embd=n_embd, block_size=block_size)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -86,3 +87,14 @@ class Head(nn.Module):
         # Weighted aggregation
         out = wei @ value
         return out
+
+
+class MultiHeadAttention(nn.Module):
+    """Multiple 'heads' of self-attention in parallel"""
+
+    def __init__(self, n_heads: int, head_size: int, n_embd: int, block_size: int):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(n_heads)])
+
+    def forward(self, x):
+        return torch.cat([h(x) for h in self.heads], dim=-1)
