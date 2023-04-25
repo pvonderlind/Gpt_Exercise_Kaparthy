@@ -17,8 +17,9 @@ class BigramLanguageModel(nn.Module):
         # Embedding for the position of the token
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         # ae. 4 heads of 8 dimensions = emb size of 32
-        self.sa_head = MultiHeadAttention(n_heads=4, head_size=n_embd//4, n_embd=n_embd, block_size=block_size)
+        self.sa_head = MultiHeadAttention(n_heads=4, head_size=n_embd // 4, n_embd=n_embd, block_size=block_size)
         self.lm_head = nn.Linear(n_embd, vocab_size)
+        self.ffwd = FeedForward(n_embd)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         B, T = idx.shape
@@ -28,6 +29,7 @@ class BigramLanguageModel(nn.Module):
         pos_emb = self.position_embedding_table(torch.arange(T, device=self.device))  # (T,C)
         x = token_emb + pos_emb  # (B,T,C) --> created by broadcasting T,C to B dimension
         x = self.sa_head(x)  # Pass through self-attention
+        x = self.ffwd(x)  # Add feed forward layer to give attention results more 'space to develop'
         logits = self.lm_head(x)  # (B,T,vocab_size)
         # E.g. predict what comes next by learning the logits (probabilities of next token) for each token.
 
@@ -98,3 +100,17 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, x):
         return torch.cat([h(x) for h in self.heads], dim=-1)
+
+
+class FeedForward(nn.Module):
+    """Simple layer + ReLU non-linearity"""
+
+    def __init__(self, n_embd: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, n_embd),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        return self.net(x)
