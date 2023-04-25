@@ -8,6 +8,7 @@ import torch
 BLOCK_SIZE = 8
 BATCH_SIZE = 32
 EVAL_ITER = 200
+N_EMB = 32
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
@@ -21,7 +22,7 @@ def get_random_batch(data: torch.Tensor, batch_size: int = BATCH_SIZE) -> Tuple[
 
 def train_bigram_language_model(data: torch.Tensor, vocab_size: int, batch_size: int = BATCH_SIZE, n_steps: int = 100)\
         -> models.BigramLanguageModel:
-    model = models.BigramLanguageModel(vocab_size)
+    model = models.BigramLanguageModel(vocab_size, block_size=BLOCK_SIZE, n_embd=N_EMB, device=device)
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     loss = None
