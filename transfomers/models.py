@@ -4,11 +4,10 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-torch.manual_seed(1337)
-
 
 class BigramLanguageModel(nn.Module):
-    def __init__(self, vocab_size: int, n_embd: int, block_size: int, device: str = 'cuda'):
+    def __init__(self, vocab_size: int, n_embd: int, block_size: int, n_block_layers: int, n_heads: int,
+                 device: str = 'cuda'):
         super().__init__()
         self.device = device
         self.block_size = block_size
@@ -18,12 +17,8 @@ class BigramLanguageModel(nn.Module):
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
 
         # Use multiple Transformer Blocks:
-        self.blocks = nn.Sequential(
-            Block(4, n_embd, block_size),
-            Block(4, n_embd, block_size),
-            Block(4, n_embd, block_size)
-        )
-
+        self.blocks = nn.Sequential(*[Block(n_heads, n_embd, block_size) for _ in range(n_block_layers)])
+        self.final_ln = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -36,7 +31,9 @@ class BigramLanguageModel(nn.Module):
 
         # Pass through transformer blocks:
         x = self.blocks(x)
+        x = self.final_ln(x)
 
+        # Get logits
         logits = self.lm_head(x)  # (B,T,vocab_size)
         # E.g. predict what comes next by learning the logits (probabilities of next token) for each token.
 
@@ -72,7 +69,7 @@ class BigramLanguageModel(nn.Module):
 class Head(nn.Module):
     """Head of self-attention"""
 
-    def __init__(self, head_size: int, n_embd: int, block_size: int):
+    def __init__(self, head_size: int, n_embd: int, block_size: int, dropout: float = 0.2):
         super().__init__()
         # Note: it is important to de-activate bias as to not skew calculations!
         self.key = nn.Linear(n_embd, head_size, bias=False)
@@ -80,6 +77,7 @@ class Head(nn.Module):
         self.value = nn.Linear(n_embd, head_size, bias=False)
         # Register a buffer (e.g. a non-parameter variable in PyTorch)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -88,10 +86,11 @@ class Head(nn.Module):
         value = self.value(x)
         # Note: transpose is only necessary for the last two dimensions, as the first one is the batch dim.
         # Note: Normalize by sqrt of head size -> C ** -0.5!!
-        wei = query * key.transpose(-2, -1) * C ** -0.5  # (B,T,C) @ (B,C,T) -> (B,T,T)
+        wei = query @ key.transpose(-2, -1) * C ** -0.5  # (B,T,C) @ (B,C,T) -> (B,T,T)
         # Here: Use a numerical trick to get 0 to be actually 0 after using the exp in the softmax!
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         wei = F.softmax(wei, dim=-1)  # (B, T, T)
+        wei = self.dropout(wei)
 
         # Weighted aggregation
         out = wei @ value
@@ -117,12 +116,13 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     """Simple layer + ReLU non-linearity"""
 
-    def __init__(self, n_embd: int):
+    def __init__(self, n_embd: int, dropout: float = 0.2):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),  # *4 is from the optimizations in the 'Attention is all you need' paper.
             nn.ReLU(),
-            nn.Linear(4 * n_embd, n_embd)  # Add projection here as well (residual connection basically)
+            nn.Linear(4 * n_embd, n_embd),  # Add projection here as well (residual connection basically)
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):

@@ -5,11 +5,16 @@ import torch
 
 # Context size of each input of the transformer (e.g. n tokens in a single example)
 
-BLOCK_SIZE = 8
-BATCH_SIZE = 32
+BLOCK_SIZE = 256
+BATCH_SIZE = 64
 EVAL_ITER = 200
-N_EMB = 32
+N_HEADS = 6
+N_BLOCK_LAYERS = 6
+N_EMB = 384
+LR = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+torch.manual_seed(1337)
 
 
 def get_random_batch(data: torch.Tensor, batch_size: int = BATCH_SIZE) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -20,15 +25,16 @@ def get_random_batch(data: torch.Tensor, batch_size: int = BATCH_SIZE) -> Tuple[
     return x.to(device), y.to(device)
 
 
-def train_bigram_language_model(data: torch.Tensor, vocab_size: int, batch_size: int = BATCH_SIZE, n_steps: int = 100)\
+def train_bigram_language_model(data: torch.Tensor, vocab_size: int, n_steps: int = 100)\
         -> models.BigramLanguageModel:
-    model = models.BigramLanguageModel(vocab_size, block_size=BLOCK_SIZE, n_embd=N_EMB, device=device)
+    model = models.BigramLanguageModel(vocab_size=vocab_size, block_size=BLOCK_SIZE, n_embd=N_EMB, n_heads=N_HEADS,
+                                       n_block_layers=N_BLOCK_LAYERS, device=device)
     model = model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
     loss = None
     for steps in range(n_steps):
         # Get random batch
-        xb, yb = get_random_batch(data, batch_size)
+        xb, yb = get_random_batch(data, BATCH_SIZE)
 
         # Eval loss
         if steps % EVAL_ITER == 0:
@@ -59,6 +65,7 @@ def eval_loss(model: torch.nn.Module, data: torch.Tensor):
 if __name__ == "__main__":
     train, val, enc_dict, dec_dict = load_preprocessed_splits_for_txt('shakespeare.txt')
     bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=3000)
-    context = torch.zeros((1, 1), dtype=torch.long, device=device)
+    torch.save(bigram_model, 'bigram_model')
+    context = torch.zeros((1, BLOCK_SIZE), dtype=torch.long, device=device)
     print(decoder(bigram_model.generate(context, max_new_tokens=500)[0].tolist(), dec_dict))
 
