@@ -58,7 +58,7 @@ def eval_loss(model: torch.nn.Module, data: torch.Tensor):
 
 if __name__ == "__main__":
     train, val, enc_dict, dec_dict = load_preprocessed_splits_for_txt('shakespeare.txt')
-    bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=10000)
+    bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=3000)
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
     print(decoder(bigram_model.generate(context, max_new_tokens=500)[0].tolist(), dec_dict))
 

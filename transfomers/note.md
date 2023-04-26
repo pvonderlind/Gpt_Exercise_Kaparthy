@@ -19,3 +19,11 @@ It is necessary to normalize the self-attention weights by the square root
 of the head-size. This is important, since the weights feed into a softmax
 activation function. If we do not normalize and the weights are very positive or negaqtive,
 the __softmax will converge to a one-hot encoding!__
+
+### Layer Normalization
+* __Difference to Batch Normalization__: in BN we make sure that every unit in a layer has unit gaussian variance in
+their activation. For this we take batch mean and variance of the batch dimension. For layer norm, we do everything
+in the same way, but take the mean and variance over the first dimension (feature) and not the batch dim!
+* This also has the benefit of not maintaining momentum and buffers for mean and variance over batches.
+* __Difference to Self-Attention paper__: Nowadays (~5 years after the paper being released), it is common to apply
+LayerNorm __before__ the layers and not after like in their architecture plots.

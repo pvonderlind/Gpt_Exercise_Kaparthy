@@ -137,9 +137,11 @@ class Block(nn.Module):
         head_size = n_embd // n_heads
         self.sa = MultiHeadAttention(n_heads, head_size, n_embd, block_size)
         self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
         # Add residual connections to help optimize the training for deep architectures
-        x = x + self.sa(x)  # Pass through self-attention
-        x = x + self.ffwd(x)  # Add feed forward layer to give attention results more 'space to develop'
+        x = x + self.sa(self.ln1(x))  # Pass through layernorm + self-attention
+        x = x + self.ffwd(self.ln2(x))  # Add feed forward layer to give attention results more 'space to develop'
         return x
