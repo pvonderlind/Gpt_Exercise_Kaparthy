@@ -6,6 +6,10 @@ from torch.nn import functional as F
 
 
 class BigramLanguageModel(nn.Module):
+    """
+    Decoder-only Transformer implementation (since we don't have any input text to generate upon)
+    """
+
     def __init__(self, vocab_size: int, n_embd: int, block_size: int, n_block_layers: int, n_heads: int,
                  device: str = 'cuda'):
         super().__init__()
@@ -64,6 +68,49 @@ class BigramLanguageModel(nn.Module):
             # Shape is then (B, T+1)
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
+
+
+class MultiHeadAttentionParallel(nn.Module):
+    """"
+    A parallel version of the multi-head self-attention class.
+    EX1 from video
+    """
+
+    def __init__(self, n_heads: int, head_size: int, n_embd: int, block_size: int, dropout: float = 0.2):
+        super().__init__()
+        self.n_heads = n_heads
+        self.head_size = head_size
+        # Note: it is important to de-activate bias as to not skew calculations!
+        # We also need a projection so that the shapes match exactly 3 * n_embd for the views in the
+        # forward to work!
+        self.head_projection = nn.Linear(n_embd, 3 * n_embd, bias=False)
+        # Register a buffer (e.g. a non-parameter variable in PyTorch)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)).view(1, 1, block_size, block_size))
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # Batch, Sequence length, Embedding dimensionality (n_embd)
+        B, T, C = x.shape
+        key, query, value = self.head_projection(x).split(C, dim=-1)
+
+        # batch, sequence length, heads, head length
+        # --> We need to transpose the heads and sequence length dims to
+        # be able to use matrix multiplication in a sensible manner with the same code as before!
+        key = key.view(B, T, self.n_heads, self.head_size).transpose(1, 2)
+        query = query.view(B, T, self.n_heads, self.head_size).transpose(1, 2)
+        value = value.view(B, T, self.n_heads, self.head_size).transpose(1, 2)
+
+        # Calculate self-attention
+        wei = query @ key.transpose(-2, -1) * C ** -0.5  # (B, N_HDS, T, HD_L) @ (B, N_HDS, HD_L, T) => (B, N_HDS, T, T)
+        wei = wei.masked_fill(self.tril[:, :, :T, :T] == 0, float('-inf'))
+        wei = F.softmax(wei, dim=-1)
+        wei = self.dropout(wei)
+
+        y = wei @ value  # (B, N_HDS, T, T) @ (B, N_HDS, T, HD_L) => (B, N_HDS, T, HD_L)
+        # Append y's together like in multi-head class
+        # --> We need to swap dimensions again and them
+        y = y.transpose(1, 2).reshape(B, T, C)
+        return y
 
 
 class Head(nn.Module):
@@ -135,7 +182,8 @@ class Block(nn.Module):
     def __init__(self, n_heads: int, n_embd: int, block_size: int):
         super().__init__()
         head_size = n_embd // n_heads
-        self.sa = MultiHeadAttention(n_heads, head_size, n_embd, block_size)
+        #self.sa = MultiHeadAttention(n_heads, head_size, n_embd, block_size)
+        self.sa = MultiHeadAttentionParallel(n_heads, head_size, n_embd, block_size)
         self.ffwd = FeedForward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)

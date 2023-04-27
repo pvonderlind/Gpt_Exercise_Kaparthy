@@ -16,7 +16,7 @@ N_EMB = 384
 LR = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-MODEL_PATH = 'bigram_model'
+MODEL_PATH = 'bigram_model_parallel_selfat'
 
 torch.manual_seed(1337)
 
