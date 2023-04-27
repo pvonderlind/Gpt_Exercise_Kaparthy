@@ -1,3 +1,5 @@
+import os
+
 from transfomers import models
 from data_loader import load_preprocessed_splits_for_txt, decoder
 from typing import Tuple
@@ -13,6 +15,8 @@ N_BLOCK_LAYERS = 6
 N_EMB = 384
 LR = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+MODEL_PATH = 'bigram_model'
 
 torch.manual_seed(1337)
 
@@ -64,8 +68,12 @@ def eval_loss(model: torch.nn.Module, data: torch.Tensor):
 
 if __name__ == "__main__":
     train, val, enc_dict, dec_dict = load_preprocessed_splits_for_txt('shakespeare.txt')
-    bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=3000)
-    torch.save(bigram_model, 'bigram_model')
+    if not os.path.exists(MODEL_PATH):
+        bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=3000)
+        torch.save(bigram_model, 'MODEL_PATH')
+    else:
+        print(f"Loading previous model from {MODEL_PATH}")
+        bigram_model = torch.load(MODEL_PATH)
     context = torch.zeros((1, BLOCK_SIZE), dtype=torch.long, device=device)
     print(decoder(bigram_model.generate(context, max_new_tokens=500)[0].tolist(), dec_dict))
 
