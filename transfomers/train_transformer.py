@@ -1,7 +1,9 @@
 import os
+# to allow keyboardinterrupt
+os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = '1'
 
 from transfomers import models
-from data_loader import load_preprocessed_splits_for_txt, decoder
+from data_loader import load_preprocessed_splits_for_txt, decoder, load_crd3_text
 from typing import Tuple
 import torch
 
@@ -16,7 +18,11 @@ N_EMB = 384
 LR = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-MODEL_PATH = 'bigram_model_parallel_selfat'
+N_STEPS = 5000
+MAX_OUT_TOKENS = 500
+N_SEQUENCES = 10
+MODEL_PATH = 'crd3_lm_test'
+TXT_OUTPUT = f'text_output_{MODEL_PATH}.txt'
 
 torch.manual_seed(1337)
 
@@ -36,21 +42,24 @@ def train_bigram_language_model(data: torch.Tensor, vocab_size: int, n_steps: in
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
     loss = None
-    for steps in range(n_steps):
-        # Get random batch
-        xb, yb = get_random_batch(data, BATCH_SIZE)
+    try:
+        for steps in range(n_steps):
+            # Get random batch
+            xb, yb = get_random_batch(data, BATCH_SIZE)
 
-        # Eval loss
-        if steps % EVAL_ITER == 0:
-            train_loss = eval_loss(model, train)
-            val_loss = eval_loss(model, val)
-            print(f"Iteration {steps} | Training loss: {train_loss:.4f} ; Validation loss: {val_loss:.4f}")
+            # Eval loss
+            if steps % EVAL_ITER == 0:
+                train_loss = eval_loss(model, train)
+                val_loss = eval_loss(model, val)
+                print(f"Iteration {steps} | Training loss: {train_loss:.4f} ; Validation loss: {val_loss:.4f}")
 
-        logits, loss = model(xb, yb)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
-
+            logits, loss = model(xb, yb)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+    except KeyboardInterrupt:
+        print("Stopping early ...")
+        return model
     return model
 
 
@@ -67,13 +76,16 @@ def eval_loss(model: torch.nn.Module, data: torch.Tensor):
 
 
 if __name__ == "__main__":
-    train, val, enc_dict, dec_dict = load_preprocessed_splits_for_txt('shakespeare.txt')
+    train, val, enc_dict, dec_dict = load_crd3_text()
     if not os.path.exists(MODEL_PATH):
-        bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=3000)
-        torch.save(bigram_model, 'MODEL_PATH')
+        bigram_model = train_bigram_language_model(train, vocab_size=len(enc_dict.keys()), n_steps=4000)
+        torch.save(bigram_model, MODEL_PATH)
     else:
         print(f"Loading previous model from {MODEL_PATH}")
         bigram_model = torch.load(MODEL_PATH)
-    context = torch.zeros((1, BLOCK_SIZE), dtype=torch.long, device=device)
-    print(decoder(bigram_model.generate(context, max_new_tokens=500)[0].tolist(), dec_dict))
-
+    context = torch.zeros((N_SEQUENCES, BLOCK_SIZE), dtype=torch.long, device=device)
+    out_tokens = bigram_model.generate(context, max_new_tokens=MAX_OUT_TOKENS)
+    out_tokens = out_tokens.view(out_tokens.shape[0] * out_tokens.shape[1])
+    text = decoder(out_tokens.tolist(), dec_dict)
+    with open(TXT_OUTPUT, 'w+') as file:
+        file.write(text)

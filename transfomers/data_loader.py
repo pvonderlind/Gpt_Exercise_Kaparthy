@@ -1,5 +1,18 @@
 import torch
 from typing import List, Tuple
+from datasets import load_dataset
+
+
+def load_crd3_text() -> Tuple[torch.Tensor, torch.Tensor, dict, dict]:
+    crd3 = load_dataset('crd3')
+    train_lines = ''.join(crd3["train"]["chunk"])
+    val_lines = ''.join(crd3["validation"]["chunk"])
+    whole_ds = train_lines + val_lines
+    enc_dict, dec_dict = _build_encoder_decoder_dicts(whole_ds)
+    encoded_text = encode(whole_ds, enc_dict)
+    encoded_text_tensor = torch.LongTensor(encoded_text)
+    train, val = _create_train_val_split(encoded_text_tensor, 0.1)
+    return train, val, enc_dict, dec_dict
 
 
 def load_preprocessed_splits_for_txt(path_to_txt: str) -> Tuple[torch.Tensor, torch.Tensor, dict, dict]:
